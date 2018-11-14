@@ -1,0 +1,111 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r setup, include=FALSE, result = 'hide'}
+
+ipak <- function(pkg){
+  new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+  if (length(new.pkg)) 
+    install.packages(new.pkg, dependencies = TRUE)
+  sapply(pkg, require, character.only = TRUE)
+}
+
+#### Library ####
+packages <- c(
+  # "readxl", # Read dataframe
+  "dplyr", # Data manipulation
+  "tidyr", # Data manipulation
+  "ggplot2"#, #Nice grpahs and spatial analysis
+  # "wesanderson",
+  # "plotly",
+  # "stringr",
+  # "rgdal",
+  # "RColorBrewer",
+  # "knitr",
+  # "kableExtra",
+  # "data.table",
+  # "ggrepel",
+  # "gridExtra",
+  # "ggmap",
+  # "broom",
+  # "rgeos",
+  # "sp",
+  # "sf",
+  # "rgdal", #Spatial analysis
+  # "tools", #Spatial analysis
+  # "networkD3"
+)
+
+
+ipak(packages)
+```
+
+## R Markdown
+
+```{r Eplore_Data, eval=T, echo=T}
+
+MPA_Data <- read.csv("~/Documents/Github/SESYNC_MPA_Global/grid_MPA.csv")
+# View(grid_MPA)
+
+hist(MPA_Data$NoTakePercent)
+
+MPA_Data %>% 
+  filter(NoTakePercent < 1) %>% 
+  ggplot(.,
+         aes(NoTakePercent)
+         ) +
+  geom_histogram(binwidth = 1)
+           
+
+### Sum percentage protected
+
+MPA_IN <- MPA_Data %>% 
+  filter(NoTakePercent > 0)
+
+5122/259200 # 1.9 % of grids... 
+  
+# sum(MPA_IN$NoTakeMPAArea)
+
+MPA_IN %>% 
+  filter(NoTakePercent < 1) %>% 
+  ggplot(.,
+         aes(NoTakePercent)
+         ) +
+  geom_histogram(binwidth = .01)
+
+```
+
+
+# Map distribution of data
+
+```{r Map, eval=T, echo=T}
+
+ggplot(MPA_IN,
+         aes(
+           x = Lon,
+           y = Lat,
+           fill = NoTakePercent,
+           colour = NoTakePercent
+         )
+         ) +
+    geom_tile() +
+    coord_map(projection = "mercator") +
+    theme_bw()
+
+```
+# Import Data to supercomputer
+
+```{r Import_Data, eval=T, echo=T}
+
+MPA_Index <- MPA_Data %>% 
+  select(NoTakePercent)
+
+write.csv(MPA_Index,
+          "MPA_Index.txt",
+          row.names = F)
+
+
+```
