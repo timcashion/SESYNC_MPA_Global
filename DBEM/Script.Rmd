@@ -1,0 +1,353 @@
+---
+title: "World Mean (FGDL, IPSL, MPIL) MCP for RCP 2.6"
+author: "Juliano Palacios Abrantes"
+date: "04/05/2018"
+output: html_document
+---
+
+# Overall approach
+I first average the DBEM's Maximum Catch Potential (MCP) of 2005 to 2014 (last years of fisheries data from SAU) for each species for each one of the circulation models that we work with (GFDL, MPIL, IPSL). Secondly, I average the 2005-2014 average for all models. Finally, I added the result of each specie within each grid-cell of the world map. 
+
+The results represent the mean aggregated MCP of all species in our database for each grid-cell of the world.
+
+
+```{r setup, eval=T, echo=F, warning=F,message=F}
+
+#### READ ME !!! ####
+# Run this chunk before knit so you make sure you have all pkgs installed in R
+# This analysis will only run on a computer connected to the Drobo. 
+# If you want to run it you will need to change the "path" of the DBEM_imp_F.R function
+
+
+#### Set up packages 
+
+ipak <- function(pkg){
+  new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+  if (length(new.pkg)) 
+    install.packages(new.pkg, dependencies = TRUE)
+  sapply(pkg, require, character.only = TRUE)
+}
+
+
+#### Library ####
+packages <- c(
+  "readxl", # Read dataframe
+  "dplyr", # Data manipulation
+  "tidyr", # Data manipulation
+  "ggplot2", #Nice grpahs and spatial analysis
+  # "rgdal",
+  # "RColorBrewer", # For more nice collors
+  "knitr",
+  "kableExtra", # For Nice tables
+  "data.table",
+  # "ggrepel",
+  # "gridExtra",
+  # "ggmap",
+  "rgdal", #Spatial analysis 
+  "tools" #Spatial analysis 
+)
+
+ipak(packages)
+
+```
+
+```{r Data_Functions_Loading, eval = T, echo = T, warning=F,message=F}
+
+# Data needed
+
+#List of DBEM species
+exploited_species <- fread("/Volumes/DATA/PROJECTION exploited species ENM/exploited_species_list.csv") 
+
+# Coordenates for DBEM mapping
+Coor <- fread("~/Documents/UBC/Oceans_Project/Distribution/DBEM/Data/Lat_Lon_DBEM.txt",header = FALSE)
+colnames(Coor) <- c("INDEX","Longitude","Latitude")
+
+# Functions
+source("./Functions/DBEM_imp_F.R") #Imports a single species
+
+```
+
+
+```{r DBEM_Data, eval=T, echo =F}
+# IT works untill now for 1 model
+
+# For each species...
+# Step 1: Average the MCP of 2005 to 2014
+# Step 2: Mean of all three models (GFDL, IPSL, MPI)
+# Step 3: Addition of averages in each INDEX
+
+
+#### Parameters ####
+
+
+for(r in 2:2){
+  
+  if(r == 1){
+    Models = c("GFDL26F1","IPSL26F1","MPI26F1") #Low RCP
+    Name = paste("World_MCP_05-14_26.csv")
+  }else{
+    Models = c("GFDL85F1","IPSL85F1","MPI85F1") #High RCP
+    Name = paste("World_MCP_05-14_85.csv")
+  }
+  
+  # Dummy final dataset
+  Final_Dataset <- Coor %>% 
+    select(INDEX) %>% 
+    mutate(Total = 0)
+  
+  # Analysis ####
+  for(s in 1:nrow(exploited_species)){ # For all species
+    
+    NoSpeciesError <-  tryCatch({ # <- This will solve for species not modeled in the overall list
+      
+      for(m in 1:length(Models)){ # For all models
+        
+       # Step 1. Average MCP of 2046 - 2055 ####
+        # 1.1 Imports DBEM data
+        
+        x <-dbem_Import(exploited_species[s,1],
+                        2005,
+                        2014,
+                        Model = Models[m],
+                        Data_Type= "Catch"
+        )
+        
+        # 1.2 Averages 10 years of data
+        Mean_Spp <- x %>% 
+          mutate(Mean = rowMeans(.[,2:11], na.rm = T)) %>% 
+          select(INDEX,
+                 Mean)
+        
+        Mean_Spp <- as.data.table(Mean_Spp) # Set as datatable 
+        
+        # 1.3 Builds means for each model in one dataset
+        if(m == 1){
+          Mean_Data <- copy(Mean_Spp) # <- copies the previouse data.table
+          
+        }else{
+          setkey(Mean_Data, # <- sets the data.table as "reference" ?setkey
+                 INDEX); setkey(Mean_Spp,
+                                INDEX);
+          list <- list(Mean_Data, # <- creates a list to merge the tables
+                       Mean_Spp)
+          
+          Mean_Data <-merge(Mean_Data, #<- Merges all the data in one single file.
+                            Mean_Spp,
+                            all = TRUE) # <- This allows for the NA's
+        }
+        
+      } # Close Models loop end
+      
+      #### CHECKPOINT- CHARLY- Step 1 ####
+      # Run it from the "Model loop" to see if the loop is averaging all three models result
+      # }
+      # Mean_Data should be a dataset with 4 columns: INDEX and one with the 10y mean of each model (check)
+      # Manually checked that each model was in fact averaged for each species using 600243
+      ###_________________ END OF CHECKPOINT _______________ ###
+      
+      
+      # Step 2. Average MCP of all models ####
+      Average <- Coor %>% # To do it by INDEX
+        left_join(Mean_Data,
+                  by ="INDEX") %>% 
+        mutate(Model_Mean = rowMeans(.[,4:6], na.rm = T)) %>% # Averages the values (1-3 Index, lat, long)
+        mutate(Final_Mean = ifelse(is.na(Model_Mean),0,Model_Mean)) %>%  # Converts NA's to 0 for future sum
+        select(INDEX,
+               Final_Mean)
+      
+      
+      #### CHECKPOINT- CHARLY- Step 2 ####
+      # Average should be a dataset for the world with the mean of all models for each grid (Check)
+      # Check that the NA's are ceros and numeric for futher addition (Check)
+      ###_________________ END OF CHECKPOINT _______________ ###
+      
+      
+      # Step 3. Adding the Averages ####
+      
+      Final_Dataset[,2] = Final_Dataset[,2] + Average[,2]
+      
+     # End of NoSpeciesError TryCatch function
+    },
+    error=function(e){
+      e
+      print(paste("No information for",exploited_species[s,1],Models[m],sep = " "))
+    }
+    )
+    
+    #### CHECKPOINT- CHARLY- Step 3 and NoSpeciesError ####
+    # Final_Dataset should be the addition of each species 10 years mean of all models
+    # Manually checked that each model was in fact added for each gridcell using 600243 and 600244
+    # Cells that have value for each species are added as well as cells that ahve only one value (for one spp) 
+    
+    # Error check should jump those species in the list that do not have data. (Cheked)
+    # Tested with 600003 (no data), 600243 (data) and 600244 (overlapping data) 
+    ###_________________ END OF CHECKPOINT _______________ ###
+    
+    #### Miscellaneous ####
+    
+    # Just to have a sense of time...
+    Timer <- paste(s,"Species Completed, ",nrow(exploited_species)-s,"Species Left")
+    print(Timer)
+    print(s+1)
+  }
+  
+  # Last step Add the coordinates
+  
+  Final_Dataset <- Final_Dataset %>% 
+    left_join(Coor,
+              by = "INDEX")
+  
+  
+  write.csv(Final_Dataset,
+            Name, #World MCP between 2004 and 2014 for Low emission RCP (2.6)
+            row.names = FALSE)
+}
+
+
+```
+
+# Plotting the Map
+
+```{r Maps_Data, eval = T, echo = F, warning=F,message=F}
+
+# The path
+path_world <- ("/Users/jpalacios/Documents/R CODE/Spatial_Analysis/Data/ne_10m_coastline")
+#The File
+fnam_world <- "ne_10m_coastline.shp"
+
+#Load it!
+World <- readOGR(dsn = path_world,
+                 layer =file_path_sans_ext(fnam_world))
+
+# Functions needed
+
+# Transforms shapefile to dataframe
+fortify.shape <- function(x){
+  x@data$id <- rownames(x@data)
+  x.f = fortify(x, region = "id")
+  x.join <- inner_join(x.f, x@data, by = "id")
+}
+
+```
+
+```{R The_map, eval =T, echo = T, warning=F,message=F}
+
+
+#### Option A ####
+
+Forty_World<- fortify(World)
+
+Map <- ggplot() +
+  geom_path(data = Forty_World, aes(x = long,
+                                    y = lat,
+                                    group = group
+  ),
+  color = "black",
+  size = 0.25) +
+  coord_map(projection = "mercator") +
+  labs(list(title = "",
+            x = "Longitude",
+            y = "Latitude")) +
+  theme_classic() +
+  geom_tile(data = filter(Final_Dataset, Total >1), # And now the DBEM mean data
+            aes(x = Longitude,
+                y = Latitude,
+                fill = Total,
+                colour = Total
+            )
+  )
+
+ggsave("Map_8.5.png",
+       plot = Map,
+       width = 25,
+       height = 10,
+       units = "in"
+)
+
+```
+
+```{R Double_Check_Data, eval =F, echo = T, warning=F,message=F}
+
+Low_Data <- read.csv("~/Documents/Dropbox/Global_Andres/World_MCP_04-14_26.csv") %>% 
+  filter(Total > 0)
+High_Data <- read.csv("~/Documents/Dropbox/Global_Andres/World_MCP_04-14_85.csv") %>% 
+  filter(Total > 0)
+
+# Select Data to test
+
+Test_Data <- High_Data
+
+# Basic stats
+
+Max_L <- max(Test_Data$Total) # 7532.24
+Min_L <- min(Test_Data$Total) # 4.12-e06
+Mean_L <- mean(Test_Data$Total)
+SD_L <- sd(Test_Data$Total)
+
+# Hist
+
+ggplot(Test_Data) +
+  geom_histogram(
+    aes(
+      x= Total
+    ),
+    binwidth = 50)
+
+# Ok, veeeery squeewed
+
+
+# First Test. Selecting only extreemly big values
+
+PlotData = filter(Test_Data, Total >1000)
+max(PlotData$Total)
+
+# All the values over 1000 are in the Humboldt current
+
+# Second. Removing extreemly big values
+PlotData = filter(Test_Data, Total <1000)
+max(PlotData$Total)
+
+# Third. Maybe using log values
+
+PlotData <- Test_Data %>% 
+  mutate(Log = log10(Total))
+
+ggplot() +
+  geom_path(data = Forty_World, aes(x = long,
+                                    y = lat,
+                                    group = group
+  ),
+  color = "black",
+  size = 0.25) +
+  coord_map(projection = "mercator") +
+  labs(list(title = "",
+            x = "Longitude",
+            y = "Latitude")) +
+  theme_classic() +
+  geom_tile(data = PlotData, # And now the DBEM mean data
+            aes(x = Longitude,
+                y = Latitude,
+                fill = Log,
+                colour = Log
+            )
+  ) +
+  coord_map(projection = "mercator") +
+  scale_colour_gradient2(
+    limits=c(-4,
+             2),
+    breaks = 0.5) +
+  scale_fill_gradient2(
+    limits=c(-4,
+             2)
+  )
+
+
+ggsave("Map_Test_I85.png",
+       plot = last_plot(),
+       width = 25,
+       height = 10,
+       units = "in"
+)
+
+```
+
